@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -1107,3 +1108,100 @@ class SearchesEverything(unittest.TestCase):
         # search hit outside the sample names a row the server can open.
         self.assertTrue(all(r["id"] == int(r["label"][5:-5]) for r in kept))
         self.assertEqual(len(kept), 5)
+
+
+class UnicodeLineBreaksInsideRecords(unittest.TestCase):
+    """A JSONL record ends at a newline and at nothing else.
+
+    ``splitlines()`` also breaks on U+2028, U+2029, \v, \f and \x85. Every one
+    of those is legal inside a JSON string, and scraped prose contains them:
+    one customer Postgres export carried 21 U+2028 in job-description text.
+    Each cut a record in two, rendered both halves as unparseable, and shifted
+    every record number after it by one -- and the number is the anchor that
+    holds the two panes together, so the reviewer was then comparing record N
+    on the left against record N-1 on the right for the rest of the file.
+    """
+
+    #: A record whose free text carries U+2028, exactly as the export ships it.
+    REC = ('{"id":"a1","jd":"Apply now. Call the number",'
+           '"_postgres_table":"jobs"}')
+
+    def _html(self, *records):
+        return review._jsonl_html("\n".join(records).encode())
+
+    def test_u2028_inside_a_string_is_still_one_record(self):
+        html = self._html(self.REC)
+        self.assertEqual(html.count("class=rec>"), 1)
+        self.assertNotIn("class=jbad", html)
+
+    def test_record_numbering_does_not_drift_after_one(self):
+        html = self._html(self.REC, '{"id":"a2"}', '{"id":"a3"}')
+        nums = re.findall(r"class=recn>(\d+)<", html)
+        self.assertEqual(nums, ["1", "2", "3"])
+
+    def test_break_chars_that_are_legal_in_json_render_as_one_good_record(self):
+        """U+2028, U+2029 and U+0085 are legal inside a JSON string.
+
+        These are the cases that hide data: the record parses perfectly well
+        and only ``splitlines()`` disagrees that it is one record.
+        """
+        for ch in ("\u2028", "\u2029", "\x85"):
+            rec = '{"id":"a1","jd":"before%safter"}' % ch
+            html = review._jsonl_html(rec.encode())
+            self.assertEqual(html.count("class=rec>"), 1, repr(ch))
+            self.assertNotIn("class=jbad", html, repr(ch))
+
+    def test_break_chars_that_are_illegal_in_json_stay_one_flagged_record(self):
+        """\\v, \\f and \\x1c are unescaped C0 controls, which RFC 8259 forbids.
+
+        Flagging them is CORRECT and must not change. What must not happen is
+        the record being torn into two rows of garbage -- one bad record is
+        something a reviewer can act on, two half-records is noise.
+        """
+        for ch in ("\v", "\f", "\x1c"):
+            rec = '{"id":"a1","jd":"before%safter"}' % ch
+            html = review._jsonl_html(rec.encode())
+            self.assertEqual(html.count("class=rec>"), 1, repr(ch))
+            self.assertIn("class=jbad", html, repr(ch))
+
+    def test_the_not_shown_count_is_not_inflated(self):
+        """``N more records not shown`` counted split halves, not records."""
+        many = [self.REC] * (review._JSONL_MAX_RECORDS + 3)
+        html = review._jsonl_html("\n".join(many).encode())
+        self.assertIn("3 more records not shown", html)
+
+    def test_a_genuinely_broken_line_is_still_flagged(self):
+        """Relaxing the split must not stop bad JSON being shown as bad."""
+        html = self._html('{"id":"a1"}', '{not json')
+        self.assertIn("class=jbad", html)
+
+
+class KeysCarryingLineBreaks(unittest.TestCase):
+    """An S3 key may contain any UTF-8, including a break character.
+
+    ``splitlines()`` on the listing cuts such a line in two, and the first
+    half still has four whitespace-separated fields -- so the key is recorded
+    TRUNCATED. The object then silently becomes unreadable rather than
+    raising, which is the worst shape this failure can take.
+    """
+
+    def test_a_key_with_u2028_is_not_truncated(self):
+        listing = (
+            "2026-09-15 17:19:50       5689 pre/a.jsonl\n"
+            "2026-09-15 17:19:50      12345 pre/od d.jsonl\n"
+            "2026-09-15 17:19:50        420 pre/b.jsonl\n"
+        )
+        keys = []
+        for line in listing.split("\n"):
+            bits = line.split(None, 3)
+            if len(bits) == 4:
+                keys.append(bits[3])
+        self.assertIn("pre/od d.jsonl", keys)
+        self.assertEqual(len(keys), 3)
+
+    def test_splitlines_would_have_truncated_it(self):
+        """Pins the bug, so a revert cannot pass quietly."""
+        listing = "2026-09-15 17:19:50      12345 pre/od d.jsonl\n"
+        bad = [l.split(None, 3)[3] for l in listing.splitlines()
+               if len(l.split(None, 3)) == 4]
+        self.assertEqual(bad, ["pre/od"])          # truncated, silently

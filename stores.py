@@ -482,7 +482,12 @@ class S3Store(Store):
         else:
             out = self._aws("s3", "ls", f"s3://{self.bucket}/{base}", "--recursive")
             keys = []
-            for line in out.decode().splitlines():
+            # ``split("\n")``: an S3 key may contain any UTF-8, including the
+            # characters ``splitlines()`` treats as line breaks. Splitting on
+            # one cuts the listing line in two, and the first half still has
+            # four fields -- so the key is recorded TRUNCATED and the object
+            # silently becomes unreadable instead of erroring.
+            for line in out.decode().split("\n"):
                 bits = line.split(None, 3)
                 if len(bits) == 4:
                     keys.append(bits[3])

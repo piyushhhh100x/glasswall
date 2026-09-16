@@ -276,7 +276,16 @@ def _jsonl_html(data: bytes) -> str:
     """
     import html as _html
     import json as _json
-    lines = data.decode("utf8", "replace").splitlines()
+    # ``split("\n")``, never ``splitlines()``. A JSONL record is delimited by
+    # a newline and by nothing else, but ``splitlines()`` also breaks on
+    # U+2028, U+2029, \v, \f and \x85 -- all of which are legal INSIDE a JSON
+    # string and all of which turn up in scraped prose. One customer export
+    # carried 21 U+2028 in job-description text; each one cut a record in two,
+    # rendered both halves as unparseable, and shifted every record number
+    # after it by one. The number is the anchor that holds the two panes
+    # together, so from that record on the reviewer was comparing record N on
+    # the left against record N-1 on the right.
+    lines = data.decode("utf8", "replace").split("\n")
     rows, n = [], 0
     for raw in lines:
         if not raw.strip():
