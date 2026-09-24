@@ -78,7 +78,7 @@ def _interpreters():
     """
     home = Path.home()
     cands = [
-        os.environ.get("PII_REVIEW_PYTHON"),
+        os.environ.get("GLASSWALL_PYTHON"),
         sys.executable,
         *(str(p) for p in sorted(home.glob("*/*/.venv/bin/python"))),
         *(str(p) for p in sorted(home.glob("*/*/*/.venv/bin/python"))),

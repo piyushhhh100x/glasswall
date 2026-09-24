@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests. Run with: python3 test_review.py
+"""Tests. Run with: python3 test_glasswall.py
 
 Pairing and layout detection run on synthetic trees, so they check the logic
 rather than one batch's quirks. The end-to-end tests boot a real server and
@@ -19,13 +19,13 @@ from pathlib import Path
 
 import pairing
 import render
-import review
+import glasswall
 import stores
 
-#: A real export to run the end-to-end tests against. Point PII_REVIEW_SAMPLE
+#: A real export to run the end-to-end tests against. Point GLASSWALL_SAMPLE
 #: at one holding <unit>/raw/... and <unit>/files/...; without it those tests
 #: skip and the rest still run.
-SAMPLE = Path(os.environ.get("PII_REVIEW_SAMPLE", "~/Downloads/sample-export")).expanduser()
+SAMPLE = Path(os.environ.get("GLASSWALL_SAMPLE", "~/Downloads/sample-export")).expanduser()
 
 
 def tree(root: Path, files: dict[str, bytes]):
