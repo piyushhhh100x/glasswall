@@ -1,0 +1,9 @@
+#!/bin/bash
+# Start the reviewer.
+#
+#   ./glasswall                          ask for the location in the browser
+#   ./glasswall ~/Downloads/app-data-2026-08-28
+#   ./glasswall s3://bucket/export --profile sail
+set -euo pipefail
+cd "$(dirname "$0")"
+exec python3 glasswall.py "$@"
